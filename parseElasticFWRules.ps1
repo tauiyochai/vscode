@@ -185,14 +185,24 @@ $Result=Invoke-WebRequest -Method POST -Headers $ElasticToken -Uri $FullURL -Con
 $jsonObject = $result.Content | ConvertFrom-Json
 $results = @()
 foreach ($source in $jsonObject.aggregations.by_source.buckets) {
-    $sourceIp = $source.key
-    foreach ($destination in $source.by_destination.buckets) {
-        $destinationIp = $destination.key
+    try {
+      $sourceHost=[System.Net.Dns]::GetHostEntry($source.key).HostName
+    }
+    catch {
+      $sourceHost=$source.key
+    }
+      foreach ($destination in $source.by_destination.buckets) {
+        try {
+          $destinationHost=[System.Net.Dns]::GetHostEntry($destination.key).HostName
+        }
+        catch {
+          $destinationHost=$source.key
+        }
         foreach ($port in $destination.by_port.buckets) {
             $portNumber = $port.key
             $hitCount = $port.hits_count.value
             if ($portNumber -ne 0) {
-            $result = "From: $sourceIp to: $destinationIp using Port $portNumber has a hit count of $hitCount."
+            $result = "From: $sourceHost to: $destinationHost using Port $portNumber has a hit count of $hitCount."
             $results += $result
           }
         }
