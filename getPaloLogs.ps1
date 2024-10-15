@@ -15,7 +15,9 @@ function Submit-LogQuery {
         $url = "https://$panoramaIp/api/?type=log&log-type=traffic&query=$query&nlogs=$nlogs&skip=$skip"
         
         # Make the API request to submit logs for the current batch
-        $response = Invoke-RestMethod -Uri $url -Headers @{'X-PAN-KEY' = $apiKey} -SkipCertificateCheck
+        $response = Invoke-RestMethod -Uri $url -Method Post -Headers @{'X-PAN-KEY' = $apiKey} -SkipCertificateCheck
+        #Start-Sleep -Seconds 2  # Wait for 1 seconds before checking again
+        Write-Host "Waiting for results..."
 
         # Get the job ID from the response
         $jobId = $response.response.result.job
@@ -27,7 +29,7 @@ function Submit-LogQuery {
 
         Write-Host "Submitted query with Job ID: $jobId"
         
-        # Check the job status and wait until it is done
+        #Check the job status and wait until it is done
         while ($true) {
             $jobStatus = Get-JobStatus -panoramaIp $panoramaIp -apiKey $apiKey -jobId $jobId
             
@@ -36,7 +38,10 @@ function Submit-LogQuery {
                 break
             } else {
                 Write-Host "Job $jobId is still in progress. Waiting for completion..."
+                #Write-Host $jobStatus
                 Start-Sleep -Seconds 1  # Wait for 1 seconds before checking again
+                #Pause
+
             }
         }
 
@@ -49,6 +54,7 @@ function Submit-LogQuery {
 
         # If there are no more logs, exit the loop
         if (-not $logs) {
+            Write-Host $logs.count
             Write-Host "No more logs to retrieve."
             break
         }
@@ -58,7 +64,7 @@ function Submit-LogQuery {
     return $allLogs
 }
 
-# Function to check if the log query job is finished
+#Function to check if the log query job is finished
 function Get-JobStatus {
     param (
         [string]$panoramaIp,
@@ -68,7 +74,7 @@ function Get-JobStatus {
     
     # API call to check the job status
     $url = "https://$panoramaIp/api/?type=op&cmd=<show><query><jobid>$jobId</jobid></query></show>"
-    $response = Invoke-RestMethod -Uri $url -Method Get -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
+    $response = Invoke-RestMethod -Uri $url -Method Post -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
 
     # Parse the job status from the result
     $result = $response.response.result
@@ -76,12 +82,16 @@ function Get-JobStatus {
     # Extract the state (e.g., "DONE") from the response
     $stateRegex = [regex]'(?m)^\S+\s+(\d+)\s+([A-Za-z]+)'  # Regex to capture the state (DONE/PENDING/etc.)
     $match = $stateRegex.Match($result)
+    $count=0
 
     if ($match.Success) {
         $jobState = $match.Groups[2].Value
         return @{ Status = $jobState }
     } else {
-        throw "Failed to parse job status from the response."
+        if ($count -lt 10) {
+            $count++
+            Get-JobStatus($panoramaIp, $apiKey, $jobid)
+        }
     }
 }
 
@@ -96,8 +106,9 @@ function Get-Logs {
     $allLogs = @()
 
     # API call to retrieve the logs using the job ID
+    Write-Host "Retrieving job results for job: $jobId"
     $url = "https://$panoramaIp/api/?type=log&log-type=traffic&action=get&jobid=$jobId"
-    $response = Invoke-RestMethod -Uri $url -Method Get -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
+    $response = Invoke-RestMethod -Uri $url -Method Post -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
     
     # Check if logs are present in the response
     $entries = $response.response.result.log.logs.entry
@@ -105,6 +116,10 @@ function Get-Logs {
     if ($entries) {
         # Add logs to the collection
         $allLogs += $entries
+        Write-Host "Results retrieved. Finishing job $jobId"
+        $url = "https://$panoramaIp/api/?type=log&log-type=traffic&action=finish&jobid=$jobId"
+        $response = Invoke-RestMethod -Uri $url -Method Post -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
+
     }
 
     return $allLogs  # Return the collected logs
@@ -120,8 +135,8 @@ function Filter-Logs {
     
     foreach ($log in $logs) {
         $filteredLog = @{
-            Source        = $log.source
-            Destination   = $log.destination
+            Source        = $log.src
+            Destination   = $log.dst
             ReceiveTime   = $log.receive_time
             Rule          = $log.rule
             Application   = $log.app
@@ -137,7 +152,7 @@ function Filter-Logs {
 
 # Main script
 $panoramaIp = "pam600.tau.ac.il"
-$apiKey = "LUFRPT02MlFQelMyeDltVVZIUFBMNDAzcTBxNmswMDQ9NG9uM2FGUnpFeEIwdms1c2tKRWxsd0pNMkNkdWM5R0ZvYkFyMlJsbFJta0lZekNVZ1VtUEg0Q09WSkxHMlo3Mg=="  # Store your API key securely
+$apiKey = "LUFRPT1Kd3N5OVpaZVRMOEh5K3k4ZzVFR2JMNjNWZTA9NG9uM2FGUnpFeEIwdms1c2tKRWxsd0VWSlUvVWVnN3BvbVk5V3FkTE1UNngwZG96N0pYMkhPQTV4WGtlWWt1ZQ=="  # Store your API key securely
 $nlogs = 5000  # Number of logs to fetch per request
 $queryType = "Outbound"
 
@@ -165,6 +180,6 @@ Write-Host "Total logs fetched: $($filteredLogs.Count)"
 
 # Example: output filtered logs
 $filteredLogs | ForEach-Object {
-    Write-Host "Log entry - Source: $($_.Source), Destination: $($_.Destination), Time: $($_.ReceiveTime), Rule: $($_.Rule), App: $($_.Application), Port: $($_.Port)"
+    Write-Host "Log entry - Source: $($_.Source), Destination: $($_.Destination), Time: $($_.ReceiveTime), Rule: $($_.Rule), App: $($_.Application), Port: $($_.Port), Username: $($_.Username), Action: $($_.Action)"
 }
 $filteredLogs.Count
