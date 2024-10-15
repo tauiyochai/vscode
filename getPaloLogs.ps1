@@ -12,10 +12,10 @@ function Submit-LogQuery {
 
     while ($true) {
         # Construct the API call with pagination (nlogs and skip parameters)
-        $url = "https://$panoramaIp/api/?type=log&log-type=traffic&key=$apiKey&query=" + [System.Web.HttpUtility]::UrlEncode($query) + "&nlogs=$nlogs&skip=$skip"
+        $url = "https://$panoramaIp/api/?type=log&log-type=traffic&query=$query&nlogs=$nlogs&skip=$skip"
         
         # Make the API request to submit logs for the current batch
-        $response = Invoke-RestMethod -Uri $url -Method Get -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
+        $response = Invoke-RestMethod -Uri $url -Headers @{'X-PAN-KEY' = $apiKey} -SkipCertificateCheck
 
         # Get the job ID from the response
         $jobId = $response.response.result.job
@@ -36,7 +36,7 @@ function Submit-LogQuery {
                 break
             } else {
                 Write-Host "Job $jobId is still in progress. Waiting for completion..."
-                Start-Sleep -Seconds 10  # Wait for 10 seconds before checking again
+                Start-Sleep -Seconds 1  # Wait for 1 seconds before checking again
             }
         }
 
@@ -74,7 +74,7 @@ function Get-JobStatus {
     $result = $response.response.result
 
     # Extract the state (e.g., "DONE") from the response
-    $stateRegex = [regex]"\s+(\d+)\s+(\w+)\s+"  # Regex to capture the state (DONE/PENDING/etc.)
+    $stateRegex = [regex]'(?m)^\S+\s+(\d+)\s+([A-Za-z]+)'  # Regex to capture the state (DONE/PENDING/etc.)
     $match = $stateRegex.Match($result)
 
     if ($match.Success) {
@@ -100,7 +100,7 @@ function Get-Logs {
     $response = Invoke-RestMethod -Uri $url -Method Get -SkipCertificateCheck -Headers @{'X-PAN-KEY' = $apiKey}
     
     # Check if logs are present in the response
-    $entries = $response.response.result.log.entry
+    $entries = $response.response.result.log.logs.entry
     
     if ($entries) {
         # Add logs to the collection
@@ -138,7 +138,7 @@ function Filter-Logs {
 # Main script
 $panoramaIp = "pam600.tau.ac.il"
 $apiKey = "LUFRPT02MlFQelMyeDltVVZIUFBMNDAzcTBxNmswMDQ9NG9uM2FGUnpFeEIwdms1c2tKRWxsd0pNMkNkdWM5R0ZvYkFyMlJsbFJta0lZekNVZ1VtUEg0Q09WSkxHMlo3Mg=="  # Store your API key securely
-$nlogs = 1000  # Number of logs to fetch per request
+$nlogs = 5000  # Number of logs to fetch per request
 $queryType = "Outbound"
 
 # Define the query parameters
@@ -167,3 +167,4 @@ Write-Host "Total logs fetched: $($filteredLogs.Count)"
 $filteredLogs | ForEach-Object {
     Write-Host "Log entry - Source: $($_.Source), Destination: $($_.Destination), Time: $($_.ReceiveTime), Rule: $($_.Rule), App: $($_.Application), Port: $($_.Port)"
 }
+$filteredLogs.Count
